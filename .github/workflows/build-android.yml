@@ -1,0 +1,69 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+  workflow_dispatch:  # 수동 실행 가능
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    timeout-minutes: 60
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y \
+          git zip unzip openjdk-8-jdk python3-pip autoconf libtool \
+          pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev \
+          libtinfo5 cmake libffi-dev libssl-dev build-essential \
+          libltdl-dev ccache libffi6
+          
+    - name: Setup Java 8
+      uses: actions/setup-java@v3
+      with:
+        distribution: 'temurin'
+        java-version: '8'
+        
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip wheel setuptools
+        pip install buildozer==1.4.0 cython==0.29.33
+        
+    - name: Cache Buildozer directories
+      uses: actions/cache@v3
+      with:
+        path: |
+          .buildozer_global
+          .buildozer
+        key: buildozer-${{ hashFiles('buildozer.spec') }}-v2
+        restore-keys: |
+          buildozer-
+          
+    - name: Build Android APK
+      run: |
+        echo "=== 파일 확인 ==="
+        ls -la
+        echo "=== APK 빌드 시작 ==="
+        buildozer android debug
+        echo "=== 빌드 완료 ==="
+        ls -la bin/ || echo "bin 폴더 없음"
+        
+    - name: Upload APK
+      if: success()
+      uses: actions/upload-artifact@v3
+      with:
+        name: finance-app-debug
+        path: bin/*.apk
+        retention-days: 30
