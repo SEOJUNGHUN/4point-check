@@ -2,73 +2,119 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, develop ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main, master, develop ]
   workflow_dispatch:  # 수동 실행 가능
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04  # 더 안정적인 버전 사용
+    timeout-minutes: 60    # 타임아웃 설정
     
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
       
-    - name: Set up Python
+    - name: Set up Python 3.9
       uses: actions/setup-python@v4
       with:
-        python-version: '3.11'
+        python-version: '3.9'  # Buildozer와 더 호환성이 좋은 버전
         
     - name: Install system dependencies
       run: |
-        sudo apt-get update
+        sudo apt-get update -qq
         sudo apt-get install -y \
-          git zip unzip openjdk-17-jdk python3-pip autoconf libtool \
+          git zip unzip openjdk-8-jdk python3-pip autoconf libtool \
           pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev \
           libtinfo5 cmake libffi-dev libssl-dev build-essential \
-          libltdl-dev ccache
+          libltdl-dev ccache libffi6
           
-    - name: Setup Android SDK
-      uses: android-actions/setup-android@v3
-      
+    - name: Setup Java 8 (Buildozer 호환성)
+      uses: actions/setup-java@v3
+      with:
+        distribution: 'temurin'
+        java-version: '8'
+        
     - name: Install Python dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install buildozer cython
+        python -m pip install --upgrade pip wheel setuptools
+        pip install buildozer==1.4.0 cython==0.29.33
         
     - name: Cache Buildozer global directory
       uses: actions/cache@v3
       with:
         path: .buildozer_global
-        key: buildozer-global-${{ hashFiles('buildozer.spec') }}
+        key: buildozer-global-${{ hashFiles('buildozer.spec') }}-v2
+        restore-keys: |
+          buildozer-global-
         
     - name: Cache Buildozer directory
       uses: actions/cache@v3
       with:
         path: .buildozer
-        key: buildozer-${{ hashFiles('buildozer.spec') }}
+        key: buildozer-${{ hashFiles('buildozer.spec') }}-v2
+        restore-keys: |
+          buildozer-
+          
+    - name: Verify files
+      run: |
+        echo "=== 파일 목록 ==="
+        ls -la
+        echo "=== main.py 확인 ==="
+        head -10 main.py
+        echo "=== buildozer.spec 확인 ==="
+        head -20 buildozer.spec
         
     - name: Build Android APK
       run: |
-        # Buildozer 초기화 (필요한 경우)
-        if [ ! -f buildozer.spec ]; then
-          buildozer init
-        fi
+        echo "=== Buildozer 버전 확인 ==="
+        buildozer --version
         
-        # APK 빌드
+        echo "=== Android 디버그 APK 빌드 시작 ==="
         buildozer android debug
         
+        echo "=== 빌드 결과 확인 ==="
+        ls -la bin/ || echo "bin 디렉토리가 없습니다"
+        
     - name: Upload APK artifact
+      if: success()
       uses: actions/upload-artifact@v3
       with:
-        name: android-apk
+        name: finance-app-debug
         path: bin/*.apk
+        retention-days: 30
+        
+    - name: Upload build logs
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: build-logs
+        path: |
+          .buildozer/android/platform/build-*/logs/
+          .buildozer/android/logs/
+        retention-days: 7
         
     - name: Create Release (태그가 있는 경우)
-      if: startsWith(github.ref, 'refs/tags/')
+      if: startsWith(github.ref, 'refs/tags/') && success()
       uses: softprops/action-gh-release@v1
       with:
         files: bin/*.apk
+        name: Release ${{ github.ref_name }}
+        body: |
+          ## 금융분석도구 v${{ github.ref_name }}
+          
+          ### 다운로드
+          - Android APK 파일을 다운로드하여 설치하세요
+          
+          ### 설치 방법
+          1. 안드로이드 기기에서 "알 수 없는 소스" 허용
+          2. APK 파일 다운로드 후 설치
+          
+          ### 주요 기능
+          - 📊 TradingView 최고 순이익 주식
+          - 📈 S&P500 이익수익률 분석
+          - 💰 M2 통화량 모니터링
+          - 💱 USD/JPY 환율 추적
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
